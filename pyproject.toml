@@ -1,0 +1,122 @@
+# Setup -----------------------------------------------------------------------
+#- https://packaging.python.org/en/latest/specifications/declaring-project-metadata
+#- https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html
+[project]
+name = "key-value"
+description = "Common interface for key-value operations"
+authors = [
+  {name = "Santiago B. Perez Pita",    email="santibreo@gmail.com"},
+]
+requires-python = ">=3.11"
+#- https://choosealicense.com/
+license = {file = "LICENSE"}
+keywords = [
+]
+#- https://pypi.org/classifiers/
+classifiers = [
+]
+# Might be dynamic
+# dependencies = []
+# dependencies = {file = ["requirements.txt"]}
+dynamic = ["version", "readme"]
+
+
+[project.optional-dependencies]
+dev = [
+  "black",
+  "ruff",
+  "fakeredis",
+  "coverage",
+  "pre-commit",
+  "pytest",
+  "mypy",
+  "ipython",
+  "ipdb"
+]
+
+
+[tool.setuptools.dynamic]
+version = {attr = "key_value.__version__"}
+readme = {file = ["README.rst"]}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Toolz -----------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = 'tests'
+addopts = '--doctest-modules --tb=short'
+console_output_style = 'progress'
+doctest_optionflags = 'NORMALIZE_WHITESPACE'
+filterwarnings = [
+    # :action:regex matching warning:Warning class:module:lineno:
+]
+
+[tool.black]
+line-length = 88
+skip-string-normalization = true
+target-version = ['py39']
+# 'extend-exclude' excludes files or directories in addition to the defaults
+extend-exclude = '''
+# A regex preceded with ^/ will apply only to files and directories
+# in the root of the project.
+(
+  ^/docs/    # exclude documentation
+)
+'''
+
+[tool.coverage.run]
+branch = true
+# parallel = true
+relative_files = true
+data_file = '.coverage'
+include = [
+  './**/*.py',
+]
+omit = [
+  'conftest.py',
+  '__init__.py',
+]
+
+[tool.coverage.report]
+fail_under = 90
+include = [
+  '*/*.py',
+]
+sort = 'Cover'
+omit = [
+  'conftest.py',
+  '__init__.py',
+  'tests/*',
+]
+# Regexes for lines to exclude from consideration
+exclude_lines = [
+  # Have to re-enable the standard pragma
+  'pragma: no cover',
+  # Don't complain about missing debug-only code:
+  'def __repr__',
+  'if self\.debug',
+  # Don't complain if tests don't hit defensive assertion code:
+  'raise AssertionError',
+  'raise NotImplementedError',
+  # Don't complain if non-runnable code isn't run:
+  'if 0:',
+  'if False:',
+  'if __name__ == .__main__.:',
+]
+
+[tool.ruff]
+line-length = 100
+exclude = [
+  'code/tests/required/',
+  '__pycache__'
+]
+extend-ignore = [
+  'E731',
+]
+
+[tool.docformatter]
+recursive = true
+wrap-summaries = 82
+wrap-descriptions = 81
+blank = true

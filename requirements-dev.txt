@@ -1,0 +1,6 @@
+black
+coverage
+pre-commit
+pytest
+pytest-freezegun
+mypy
