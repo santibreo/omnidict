@@ -4,33 +4,41 @@ import pytest
 from fakeredis import FakeRedis
 from omnidict import repositories
 from typing import Callable
+from cryptography.fernet import InvalidToken
 
 
-ALL_REPOS_BUT_DEFAULT: list[Callable[[], repositories.KeyValueRepository]] = [
+STANDARD_REPOS: list[Callable[[], repositories.KeyValueRepository]] = [
     lambda: repositories.DictRepository(expire_seconds=60),
     lambda: repositories.DirectoryRepository(expire_seconds=60),
     lambda: repositories.DbFilenameRepository(expire_seconds=60),
     lambda: repositories.RedisRepository(FakeRedis(), expire_seconds=60),
 ]
-ALL_REPOS = ALL_REPOS_BUT_DEFAULT + [
+ENCRYPTED_REPOS: list[Callable[[], repositories.KeyValueRepository]] = [
+    lambda: repositories.DictRepository(expire_seconds=60, passphrase='test'),
+    lambda: repositories.DirectoryRepository(expire_seconds=60, passphrase='test'),
+    lambda: repositories.DbFilenameRepository(expire_seconds=60, passphrase='test'),
+    lambda: repositories.RedisRepository(FakeRedis(), expire_seconds=60, passphrase='test'),
+]
+DEFAULT_REPO: list[Callable[[], repositories.KeyValueRepository]] = [
     lambda: repositories.DefaultRepository(default=uuid4)
 ]
+ALL_REPOS = STANDARD_REPOS + ENCRYPTED_REPOS + DEFAULT_REPO
 
 
-@pytest.mark.parametrize('repository_factory',  ALL_REPOS_BUT_DEFAULT)
+@pytest.mark.parametrize('repository_factory', STANDARD_REPOS + ENCRYPTED_REPOS)
 def test_get_not_found(repository_factory):
     repository = repository_factory()
     with pytest.raises(KeyError):
         repository['a']
 
 
-@pytest.mark.parametrize('repository_factory',  ALL_REPOS_BUT_DEFAULT)
+@pytest.mark.parametrize('repository_factory', STANDARD_REPOS + ENCRYPTED_REPOS)
 def test_get_not_found_by_method(repository_factory):
     repository = repository_factory()
     assert repository.get('a') is repository.default(), '`get` non existing key'
 
 
-@pytest.mark.parametrize('repository_factory',  ALL_REPOS)
+@pytest.mark.parametrize('repository_factory', ALL_REPOS)
 def test_get_existing(repository_factory):
     repository = repository_factory()
     repository['a'] = '1'
@@ -44,7 +52,7 @@ def test_get_existing_by_method(repository_factory):
     assert repository.get('a') == '1', '`get` existing key'
 
 
-@pytest.mark.parametrize('repository_factory',  ALL_REPOS_BUT_DEFAULT)
+@pytest.mark.parametrize('repository_factory', STANDARD_REPOS + ENCRYPTED_REPOS)
 def test_del_not_found(repository_factory):
     repository = repository_factory()
     with pytest.raises(KeyError):
@@ -98,7 +106,7 @@ def test_set_existing_by_method(repository_factory):
     assert repository.set('a', '1') is None, '`set` existing key'
 
 
-@pytest.mark.parametrize('repository_factory',  ALL_REPOS_BUT_DEFAULT)
+@pytest.mark.parametrize('repository_factory', STANDARD_REPOS + ENCRYPTED_REPOS)
 def test_get_expired_key(repository_factory, freezer):
     repository = repository_factory()
     repository['a'] = '1'
@@ -107,7 +115,7 @@ def test_get_expired_key(repository_factory, freezer):
         repository['a']
 
 
-@pytest.mark.parametrize('repository_factory',  ALL_REPOS_BUT_DEFAULT)
+@pytest.mark.parametrize('repository_factory', STANDARD_REPOS + ENCRYPTED_REPOS)
 def test_get_expired_key_by_method(repository_factory, freezer):
     repository = repository_factory()
     repository['a'] = '1'
@@ -115,7 +123,7 @@ def test_get_expired_key_by_method(repository_factory, freezer):
     assert repository.get('a') == repository.default(), 'get expired key is not default'
 
 
-@pytest.mark.parametrize('repository_factory',  ALL_REPOS_BUT_DEFAULT)
+@pytest.mark.parametrize('repository_factory', STANDARD_REPOS + ENCRYPTED_REPOS)
 def test_get_key_refreshes_expiration(repository_factory, freezer):
     repository: repositories.KeyValueRepository = repository_factory()
     start = datetime.now()
@@ -128,3 +136,12 @@ def test_get_key_refreshes_expiration(repository_factory, freezer):
         'Not enough time elapsed'
     )
     assert val == '1', 'get does not refreshes expiration'
+
+
+@pytest.mark.parametrize('repository_factory', ENCRYPTED_REPOS)
+def test_encrypted_values(repository_factory):
+    repository = repository_factory()
+    repository['a'] = '1'
+    repository.cipher = repository.build_cipher('other')
+    with pytest.raises(InvalidToken):
+        repository.get('a')

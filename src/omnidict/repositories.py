@@ -5,11 +5,15 @@ Storage classes that unifies interactions with key-value stored information
 import abc
 import json
 import pickle
+import random
 import shelve
 import tempfile
 from hashlib import md5
 from pathlib import Path
-from datetime import datetime, timedelta, timezone
+from base64 import b64encode
+from datetime import datetime, timedelta
+# Installed
+from cryptography.fernet import Fernet
 # Types
 from typing import Any
 from typing import Self
@@ -21,6 +25,7 @@ from typing import Callable
 
 _T = TypeVar('_T')
 _END_OF_TIME = datetime.utcnow() + timedelta(seconds=3600 * 24 * 365.25 * 10)
+_SeedType = None | int | float | str | bytes | bytearray
 
 
 class KeyValueRepository(abc.ABC, Generic[_T]):
@@ -43,49 +48,83 @@ class KeyValueRepository(abc.ABC, Generic[_T]):
         storage: _T,
         /,
         expire_seconds: int = 0,
+        passphrase: _SeedType = '',
         *,
         default: None | Callable[[], Any] = None
     ):
         self.storage: _T = storage
         self.expire_seconds: int = expire_seconds
         if default is None:
-            self._has_default = True
+            self._has_default = False
             self.default = lambda: None
         else:
-            self._has_default = False
+            self._has_default = True
             self.default = default
+        if not passphrase:
+            self._is_encrypted = False
+            self.cipher = None
+        else:
+            self._is_encrypted = True
+            self.cipher = self.build_cipher(passphrase)
 
     @property
     def has_default(self) -> bool:
         return self._has_default
+
+    @property
+    def is_encrypted(self) -> bool:
+        return self._is_encrypted
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(storage={repr(self.storage)})"
 
     def __init_subclass__(cls: type[Self]) -> None:
         super().__init_subclass__()
-        getitem = cls.__getitem__
-        cls.__getitem__ = lambda s, k: cls.unserialize_val(
-            getitem(s, cls.customize_key(k))
-        )
         delitem = cls.__delitem__
         cls.__delitem__ = lambda s, k: delitem(s, cls.customize_key(k))
+        getitem = cls.__getitem__
+        cls.__getitem__ = lambda s, k: cls.unserialize_val(
+            getitem(s, cls.customize_key(k)) if not s.is_encrypted
+            else s.cipher.decrypt(getitem(s, cls.customize_key(k)))
+        )
         setitem = cls.__setitem__
         cls.__setitem__ = lambda s, k, v: setitem(
-            s, cls.customize_key(k), cls.serialize_val(v)
+            s, cls.customize_key(k),
+            cls.serialize_val(v) if not s.is_encrypted
+            else s.cipher.encrypt(cls.serialize_val(v))
         )
+
+    @staticmethod
+    def build_cipher(passphrase: _SeedType) -> Fernet:
+        random.seed(passphrase)
+        return Fernet(key=b64encode(random.randbytes(32)))
 
     @staticmethod
     def customize_key(key: str) -> str:
+        """Converts key into a different string, like :python:`"prefix:{}".format`"""
         return key
 
     @staticmethod
-    def serialize_val(val: Any) -> bytes | str:
-        return json.dumps(val)
+    def serialize_val(val: Any) -> bytes:
+        """Serializes any Python object into bytes"""
+        return json.dumps(val).encode()
 
     @staticmethod
-    def unserialize_val(val: Any) -> bytes | str:
-        return json.loads(val)
+    def unserialize_val(val: bytes) -> Any:
+        """De-serializes bytes into original Python object"""
+        return json.loads(val.decode())
+
+    @classmethod
+    def from_existing(
+        cls,
+        storage: _T,
+        /,
+        expire_seconds: int = 0,
+        passphrase: _SeedType = '',
+        *,
+        default: None | Callable[[], Any] = None
+    ) -> Self:
+        raise NotImplementedError()
 
     def _expire(self, key: str) -> None:
         """Marks provided ``key`` to be forgotten after provided ``seconds`` """
@@ -131,13 +170,14 @@ class DictRepository(KeyValueRepository[dict]):
 
     def __init__(
         self,
-        storage: Optional[dict[str | bytes, str | bytes]] = None,
+        storage: Optional[dict[str, bytes]] = None,
         expire_seconds: int = 0,
+        passphrase: _SeedType = '',
         *,
         default: None | Callable[[str], Any] = None
     ):
-        super().__init__(storage or dict(), expire_seconds, default=default)
-        self.expire_storage: dict[str | bytes, datetime] = dict()
+        super().__init__(storage or dict(), expire_seconds, passphrase, default=default)
+        self.expire_storage: dict[str, datetime] = dict()
 
     def _expire(self, key: str) -> None:
         if self.expire_seconds <= 0:
@@ -226,13 +266,14 @@ class DirectoryRepository(KeyValueRepository[Path]):
         self,
         directory: Path | str = '',
         expire_seconds: int = 0,
+        passphrase: _SeedType = '',
         *,
         default: None | Callable[[str], Any] = None
     ):
         storage = Path(directory or tempfile.mkdtemp())
         if storage.is_file():
             raise TypeError(f"DirectoryRepository initialized with file path '{storage}'")
-        super().__init__(storage, expire_seconds, default=default)
+        super().__init__(storage, expire_seconds, passphrase, default=default)
         self.storage.mkdir(exist_ok=True, parents=True)
         self.expire_storage = shelve.DbfilenameShelf(tempfile.mktemp())
 
@@ -293,13 +334,14 @@ class DbFilenameRepository(KeyValueRepository[Path]):
         self,
         filepath: str | Path = '',
         expire_seconds: int = 0,
+        passphrase: _SeedType = '',
         *,
         default: None | Callable[[str], Any] = None
     ):
         if Path(filepath).is_file():
             raise TypeError(f"DbFilenameRepository initialized with file path '{filepath}'")
         storage = shelve.DbfilenameShelf(filepath or tempfile.mktemp())
-        super().__init__(storage, expire_seconds, default=default)
+        super().__init__(storage, expire_seconds, passphrase, default=default)
         self.expire_storage = shelve.DbfilenameShelf(tempfile.mktemp())
 
     def _expire(self, key: str) -> None:

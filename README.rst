@@ -18,4 +18,4 @@ Opinionated interface for many key/value repositories:
 
 * **Expiration**: You can define ``expire_seconds`` parameter to make your associations expire. Expiration time is refreshed every time you access a key.
 
-* **Encryption** (*coming soon*): You can define a ``passphrase`` parameter to encrypt your values using symmetric encryption.
+* **Encryption**: You can define a ``passphrase`` parameter to encrypt your values using symmetric encryption.
