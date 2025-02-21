@@ -2,7 +2,7 @@ from uuid import uuid4
 from datetime import datetime, timedelta
 import pytest
 from fakeredis import FakeRedis
-from key_value import repositories
+from omnidict import repositories
 from typing import Callable
 
 

@@ -2,8 +2,8 @@
 #- https://packaging.python.org/en/latest/specifications/declaring-project-metadata
 #- https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html
 [project]
-name = "key-value"
-description = "Common interface for key-value operations"
+name = "omnidict"
+description = "Common interface for many key-value storages"
 authors = [
   {name = "Santiago B. Perez Pita",    email="santibreo@gmail.com"},
 ]
@@ -36,7 +36,7 @@ dev = [
 
 
 [tool.setuptools.dynamic]
-version = {attr = "key_value.__version__"}
+version = {attr = "omnidict.__version__"}
 readme = {file = ["README.rst"]}
 
 [tool.setuptools.packages.find]

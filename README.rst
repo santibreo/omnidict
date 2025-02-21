@@ -2,13 +2,13 @@
   To get a better overview visit `key-value documentation webpage <https://santibreo.github.io/key-value/index.html>`_.
 
 
-#########
-key-value
-#########
+########
+Omnidict
+########
 
-Opinionated interface for key/value repositories in Python:
+Opinionated interface for many key/value repositories:
 
-  I am kind of tired of having to do small changes when I move from Dictionary, to Redis, to Shelve or whatever key/value storage I am using. This is an interface heavily inspired by `builtin shelve module <https://docs.python.org/3/library/shelve.html>`_ to make all those `key-value` repositories  behave the same way:
+  I am kind of tired of having to do small changes when I move from Dictionary, to Redis, to Shelve or whatever key/value storage I am using. This is an interface heavily inspired by `builtin shelve module <https://docs.python.org/3/library/shelve.html>`_ to make all those `mapping` repositories  behave the same way:
 
 * **Get item**: ``storage['key']`` returns the value associated to ``'key'`` and raises a ``KeyError`` if ``'key'`` is not defined. ``storage.get('key')`` behaves the same way but returns ``default()`` when ``'key'`` is not defined.
 
