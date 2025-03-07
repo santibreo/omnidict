@@ -2,10 +2,9 @@
 from functools import wraps
 from itertools import starmap
 # Local
-from key_value_storage import storage_tools
+from omnidict import repositories
 # Types
 from typing import Any
-from typing import Type
 from typing import Generic
 from typing import TypeVar
 from typing import Optional
@@ -14,20 +13,19 @@ from typing import ParamSpec
 from typing import Concatenate
 
 
-T = TypeVar('T')
-P = ParamSpec('P')
-ResultValidator = Callable[[Any], bool]
-CacheCreator = Callable[[ResultValidator], 'Cache']
+_T = TypeVar('_T')
+_R = TypeVar('_R', bound=repositories.KeyValueRepository)
+_P = ParamSpec('_P')
 
 
-class Cache:
+class Cache(Generic[_R]):
     """Decorator class to cache function calls
 
     It can be instantiated with a method to validate results. Decorated function
     is called and if it returns a valid value, it is cached.
 
-    You set ``storage`` attribute to define how cache should be stored. Default
-    is using ``pickle`` files in ``~/.cache/`` directory
+    You set ``repository`` attribute to define how cache should be stored. Default
+    it uses in memory dictionary.
 
     When you use ``Cache`` instance to decorate a function, the keyword-only
     ``ignore_cache`` argument is added to its signature so you can avoid using
@@ -39,17 +37,20 @@ class Cache:
 
     def __init__(
         self,
-        result_validator: Optional[ResultValidator] = None,
-        storage: storage_tools.KeyValueStorage = storage_tools.DirectoryStorage()
+        repository: Optional[_R] = None,
+        result_validator: Optional[Callable[[Any], bool]] = None,
     ):
         if result_validator is not None:
             self.validate = result_validator
         else:
             self.validate = lambda _: True
-
+        if repository is None:
+            self.repository: _R = repositories.DictRepository()
+        else:
+            self.repository: _R = repository
 
     @classmethod
-    def make_function_call_key(cls, func: Callable, *args, **kwargs) -> str:
+    def key_from_function_call(cls, func: Callable, *args, **kwargs) -> str:
         """Creates cache key for given function, arguments and keyword
         arguments
         """
@@ -82,7 +83,6 @@ class Cache:
         kwargstr = cls.param_sep.join(starmap("{}={}".format, in_kwargs.items()))
         return f"{prefix}{cls.fun_sep}{argstr}{cls.type_sep}{kwargstr}"
 
-
     @classmethod
     def function_call_from_key(
         cls,
@@ -108,40 +108,35 @@ class Cache:
         kwargs = dict(map(lambda s: s.split('=', 1), kwargs_tuple))
         return prefix, args, kwargs
 
-    @property
-    def storage(self) -> storage_tools.KeyValueStorage:
-        """Gets :class:`storage_tools.KeyValueStorage` with cached results"""
-        return type(self)._storage
-
-    @storage.setter
-    def storage(self, storage: storage_tools.KeyValueStorage) -> None:
-        """Sets :class:`storage_tools.KeyValueStorage` to provided ``storage``"""
-        type(self)._storage = storage
-
     def __call__(
         self,
-        func: Callable[P, T]
-    ) -> Callable[Concatenate[bool, P], T]:
+        func: Callable[_P, _T]
+    ) -> Callable[Concatenate[bool, _P], _T]:
 
         @wraps(func)
         def inner_func(
-            *args: P.args, ignore_cache: bool = False, **kwargs: P.kwargs
-        ) -> T:
+            *args: _P.args, ignore_cache: bool = False, **kwargs: _P.kwargs
+        ) -> _T:
             try:
-                cache_key = self.make_function_call_key(func, *args, **kwargs)
+                cache_key = self.key_from_function_call(func, *args, **kwargs)
             except IndexError:
                 raise TypeError(
                     f"Cannot create cache key for called {func} with {args=} "
                     f"and {kwargs=}"
                 )
+            # Retrieve key from cache
             if not ignore_cache:
-                result = self.storage.get(cache_key)
-                if result is not None and self.validate(result):
+                # Scan cache using None as default
+                old_default = self.repository.default
+                self.repository.default = lambda: None
+                result = self.repository.get(cache_key)
+                self.repository.default = old_default
+                if result is not None:
                     return result
-            self.storage.delete(cache_key)
+            # Retrieve key calling function
             result = func(*args, **kwargs)
             if self.validate(result):
-                self.storage.set(cache_key, result)
+                self.repository.set(cache_key, result)
             return result
 
         return inner_func
