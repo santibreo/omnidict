@@ -10,7 +10,7 @@ from packaging.version import Version
 _PATTERN = re.compile(r"(def _get_version_from_git_tags\(default: str = )'.*'(\):)")
 
 
-def _get_version_from_git_tags(default: str = '1.0.0a3'):
+def _get_version_from_git_tags(default: str = '1.0.0a4'):
 
     def set_version_as_default(version: str):
         content = Path(__file__).read_text()

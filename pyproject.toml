@@ -16,7 +16,10 @@ keywords = [
 classifiers = [
 ]
 # Might be dynamic
-# dependencies = []
+dependencies = [
+    "packaging==24.2,<25",
+    "cryptography>=44.0.1,<45",
+]
 # dependencies = {file = ["requirements.txt"]}
 dynamic = ["version", "readme"]
 
