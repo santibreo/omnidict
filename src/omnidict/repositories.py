@@ -11,7 +11,7 @@ import tempfile
 from hashlib import md5
 from pathlib import Path
 from base64 import b64encode
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 # Installed
 from cryptography.fernet import Fernet
 # Types
@@ -21,11 +21,19 @@ from typing import Generic
 from typing import TypeVar
 from typing import Optional
 from typing import Callable
+from typing import Iterator
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from redis import Redis
 
 
 _T = TypeVar('_T')
-_END_OF_TIME = datetime.utcnow() + timedelta(seconds=3600 * 24 * 365.25 * 10)
 _SeedType = None | int | float | str | bytes | bytearray
+
+
+def _now() -> datetime:
+    """TZ-aware UTC located now"""
+    return datetime.now(tz=timezone.utc)
 
 
 class KeyValueRepository(abc.ABC, Generic[_T]):
@@ -50,13 +58,13 @@ class KeyValueRepository(abc.ABC, Generic[_T]):
         expire_seconds: int = 0,
         passphrase: _SeedType = '',
         *,
-        default: None | Callable[[], Any] = None
+        default: None | Callable[[str], Any] = None
     ):
         self.storage: _T = storage
         self.expire_seconds: int = expire_seconds
         if default is None:
             self._has_default = False
-            self.default = lambda: None
+            self.default = lambda _: None
         else:
             self._has_default = True
             self.default = default
@@ -81,17 +89,17 @@ class KeyValueRepository(abc.ABC, Generic[_T]):
     def __init_subclass__(cls: type[Self]) -> None:
         super().__init_subclass__()
         delitem = cls.__delitem__
-        cls.__delitem__ = lambda s, k: delitem(s, cls.customize_key(k))
+        cls.__delitem__ = lambda self, key: delitem(self, cls.customize_key(key))
         getitem = cls.__getitem__
-        cls.__getitem__ = lambda s, k: cls.unserialize_val(
-            getitem(s, cls.customize_key(k)) if not s.is_encrypted
-            else s.cipher.decrypt(getitem(s, cls.customize_key(k)))
+        cls.__getitem__ = lambda self, key: cls.unserialize_val(
+            getitem(self, cls.customize_key(key)) if not self.is_encrypted
+            else self.cipher.decrypt(getitem(self, cls.customize_key(key)))
         )
         setitem = cls.__setitem__
-        cls.__setitem__ = lambda s, k, v: setitem(
-            s, cls.customize_key(k),
-            cls.serialize_val(v) if not s.is_encrypted
-            else s.cipher.encrypt(cls.serialize_val(v))
+        cls.__setitem__ = lambda self, key, value: setitem(
+            self, cls.customize_key(key),
+            cls.serialize_val(value) if not self.is_encrypted
+            else self.cipher.encrypt(cls.serialize_val(value))
         )
 
     @staticmethod
@@ -122,13 +130,17 @@ class KeyValueRepository(abc.ABC, Generic[_T]):
         expire_seconds: int = 0,
         passphrase: _SeedType = '',
         *,
-        default: None | Callable[[], Any] = None
+        default: None | Callable[[str], Any] = None
     ) -> Self:
         raise NotImplementedError()
 
     def _expire(self, key: str) -> None:
         """Marks provided ``key`` to be forgotten after provided ``seconds`` """
         raise NotImplementedError(f"{type(self).__name__} does not support expire keys")
+
+    def iter_matching(self, pattern: str) -> Iterator[tuple[str, Any]]:
+        """Iterates over (key, value) pairs of keys that match provided pattern"""
+        raise NotImplementedError(f"{type(self).__name__} does not matching iteration")
 
     @abc.abstractmethod
     def __getitem__(self, key: str) -> Any:
@@ -157,7 +169,7 @@ class KeyValueRepository(abc.ABC, Generic[_T]):
         try:
             return self[key]
         except KeyError:
-            return self.default()
+            return self.default(key)
 
     def set(self, key: str, value: Any) -> None:
         """Sets ``value`` associated to provided ``key`` overwritting if key exists"""
@@ -182,7 +194,7 @@ class DictRepository(KeyValueRepository[dict]):
     def _expire(self, key: str) -> None:
         if self.expire_seconds <= 0:
             return
-        self.expire_storage[key] = datetime.utcnow() + timedelta(seconds=self.expire_seconds)
+        self.expire_storage[key] = _now() + timedelta(seconds=self.expire_seconds)
 
     def __getitem__(self, key: str) -> Any:
         value = self.storage.get(key)
@@ -191,7 +203,7 @@ class DictRepository(KeyValueRepository[dict]):
         if (
             (self.expire_seconds > 0)
             and ((ttl := self.expire_storage.get(key)) is not None)
-            and (ttl < datetime.utcnow())
+            and (ttl < _now())
         ):
             del self[key]
             raise KeyError(f"Key '{key}' has expired")
@@ -222,17 +234,17 @@ class RedisRepository(KeyValueRepository['Redis']):
 
     """
     @staticmethod
-    def serialize_val(val: Any) -> bytes | str:
+    def serialize_val(val: Any) -> bytes:
         return pickle.dumps(val)
 
     @staticmethod
-    def unserialize_val(val: Any) -> bytes | str:
+    def unserialize_val(val: bytes) -> Any:
         return pickle.loads(val)
 
     def _expire(self, key: str) -> None:
         if self.expire_seconds <= 0:
             return
-        return self.storage.expire(key, time=self.expire_seconds)
+        self.storage.expire(key, time=self.expire_seconds)
 
     def __getitem__(self, key: str) -> Any:
         val = self.storage.get(key)
@@ -247,7 +259,7 @@ class RedisRepository(KeyValueRepository['Redis']):
         self.storage.delete(key)
 
     def __setitem__(self, key: str, value: Any) -> None:
-        if self.storage.get(key) is not self.default():
+        if self.storage.get(key) is not self.default(key):
             raise KeyError(f"Key '{key}' already stored")
         self.storage[key] = value
         self._expire(key)
@@ -282,17 +294,17 @@ class DirectoryRepository(KeyValueRepository[Path]):
         return md5(key.encode()).hexdigest()
 
     @staticmethod
-    def serialize_val(val: Any) -> bytes | str:
+    def serialize_val(val: Any) -> bytes:
         return pickle.dumps(val)
 
     @staticmethod
-    def unserialize_val(val: Any) -> bytes | str:
+    def unserialize_val(val: bytes) -> Any:
         return pickle.loads(val)
 
     def _expire(self, key: str) -> None:
         if self.expire_seconds <= 0:
             return
-        self.expire_storage[key] = datetime.utcnow() + timedelta(seconds=self.expire_seconds)
+        self.expire_storage[key] = _now() + timedelta(seconds=self.expire_seconds)
 
     def __getitem__(self, key: str) -> Any:
         filepath = self.storage / f"{key}.pickle"
@@ -301,7 +313,7 @@ class DirectoryRepository(KeyValueRepository[Path]):
         if (
             (self.expire_seconds > 0)
             and ((ttl := self.expire_storage.get(key)) is not None)
-            and (ttl < datetime.utcnow())
+            and (ttl < _now())
         ):
             del self[key]
             raise KeyError(f"Key '{key}' has expired")
@@ -322,7 +334,7 @@ class DirectoryRepository(KeyValueRepository[Path]):
         filepath.write_bytes(value)
 
 
-class DbFilenameRepository(KeyValueRepository[Path]):
+class DbFilenameRepository(KeyValueRepository[shelve.DbfilenameShelf]):
     R"""Db filename used as storage
 
     - Keys are preserved
@@ -347,7 +359,7 @@ class DbFilenameRepository(KeyValueRepository[Path]):
     def _expire(self, key: str) -> None:
         if self.expire_seconds <= 0:
             return
-        self.expire_storage[key] = datetime.utcnow() + timedelta(seconds=self.expire_seconds)
+        self.expire_storage[key] = _now() + timedelta(seconds=self.expire_seconds)
 
     def __getitem__(self, key: str) -> Any:
         value = self.storage.get(key)
@@ -356,7 +368,7 @@ class DbFilenameRepository(KeyValueRepository[Path]):
         if (
             (self.expire_seconds > 0)
             and ((ttl := self.expire_storage.get(key)) is not None)
-            and (ttl < datetime.utcnow())
+            and (ttl < _now())
         ):
             del self[key]
             raise KeyError(f"Key '{key}' has expired")
@@ -384,11 +396,11 @@ class DefaultRepository(KeyValueRepository[dict]):
         super().__init__(dict(), expire_seconds=0, default=default)
 
     @staticmethod
-    def serialize_val(val: Any) -> bytes | str:
+    def serialize_val(val: Any) -> bytes:
         return pickle.dumps(val)
 
     @staticmethod
-    def unserialize_val(val: Any) -> bytes | str:
+    def unserialize_val(val: bytes) -> Any:
         return pickle.loads(val)
 
     def __getitem__(self, key: str) -> Any:

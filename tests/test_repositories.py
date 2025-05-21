@@ -20,7 +20,7 @@ ENCRYPTED_REPOS: list[Callable[[], repositories.KeyValueRepository]] = [
     lambda: repositories.RedisRepository(FakeRedis(), expire_seconds=60, passphrase='test'),
 ]
 DEFAULT_REPO: list[Callable[[], repositories.KeyValueRepository]] = [
-    lambda: repositories.DefaultRepository(default=uuid4)
+    lambda: repositories.DefaultRepository(default=lambda _: uuid4())
 ]
 ALL_REPOS = STANDARD_REPOS + ENCRYPTED_REPOS + DEFAULT_REPO
 
@@ -35,7 +35,7 @@ def test_get_not_found(repository_factory):
 @pytest.mark.parametrize('repository_factory', STANDARD_REPOS + ENCRYPTED_REPOS)
 def test_get_not_found_by_method(repository_factory):
     repository = repository_factory()
-    assert repository.get('a') is repository.default(), '`get` non existing key'
+    assert repository.get('a') is repository.default('a'), '`get` non existing key'
 
 
 @pytest.mark.parametrize('repository_factory', ALL_REPOS)
@@ -120,7 +120,7 @@ def test_get_expired_key_by_method(repository_factory, freezer):
     repository = repository_factory()
     repository['a'] = '1'
     freezer.move_to(timedelta(seconds=61))
-    assert repository.get('a') == repository.default(), 'get expired key is not default'
+    assert repository.get('a') == repository.default('a'), 'get expired key is not default'
 
 
 @pytest.mark.parametrize('repository_factory', STANDARD_REPOS + ENCRYPTED_REPOS)

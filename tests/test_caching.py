@@ -35,7 +35,6 @@ class Case(TestCase):
 case = Case()
 
 
-
 def test_key_from_function_call():
 
     def tester(func):

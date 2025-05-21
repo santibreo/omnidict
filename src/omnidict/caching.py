@@ -128,7 +128,7 @@ class Cache(Generic[_R]):
             if not ignore_cache:
                 # Scan cache using None as default
                 old_default = self.repository.default
-                self.repository.default = lambda: None
+                self.repository.default = lambda _: None
                 result = self.repository.get(cache_key)
                 self.repository.default = old_default
                 if result is not None:
