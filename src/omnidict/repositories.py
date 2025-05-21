@@ -188,6 +188,7 @@ class DictRepository(KeyValueRepository[dict]):
         expire_seconds: int = 0,
         passphrase: _SeedType = '',
         *,
+        prefix: str = '',
         default: None | Callable[[str], Any] = None
     ):
         super().__init__(storage or dict(), expire_seconds, passphrase, default=default)
@@ -234,7 +235,8 @@ class DictRepository(KeyValueRepository[dict]):
 class RedisRepository(KeyValueRepository['Redis']):
     R"""Redis service used as storage
 
-    - Keys are used as provided
+    - Keys can be modified with ``prefix``, customizing
+      :method:`KeyValueRepository.customize_key` or customizing redis client (storage)
     - Values are :mod:`pickle`\ .dumped and loaded, to allow arbitrary Python
       objects
     - Results might not persist when Redis restarts, depending on configuration
@@ -290,6 +292,7 @@ class DirectoryRepository(KeyValueRepository[Path]):
         expire_seconds: int = 0,
         passphrase: _SeedType = '',
         *,
+        prefix: str = '',
         default: None | Callable[[str], Any] = None
     ):
         storage = Path(directory or tempfile.mkdtemp())
@@ -299,9 +302,8 @@ class DirectoryRepository(KeyValueRepository[Path]):
         self.storage.mkdir(exist_ok=True, parents=True)
         self.expire_storage = shelve.DbfilenameShelf(tempfile.mktemp())
 
-    @staticmethod
-    def customize_key(key: str):
-        return md5(key.encode()).hexdigest()
+    def customize_key(self, key: str):
+        return f"{self.prefix}{md5(key.encode()).hexdigest()}"
 
     @staticmethod
     def serialize_val(val: Any) -> bytes:
@@ -358,6 +360,7 @@ class DbFilenameRepository(KeyValueRepository[shelve.DbfilenameShelf]):
         expire_seconds: int = 0,
         passphrase: _SeedType = '',
         *,
+        prefix: str = '',
         default: None | Callable[[str], Any] = None
     ):
         if Path(filepath).is_file():
@@ -402,8 +405,8 @@ class DbFilenameRepository(KeyValueRepository[shelve.DbfilenameShelf]):
 class DefaultRepository(KeyValueRepository[dict]):
     """Repository that always returns values from ``default``"""
 
-    def __init__(self, *, default: Callable[[str | bytes], str | bytes]):
-        super().__init__(dict(), expire_seconds=0, default=default)
+    def __init__(self, *, prefix: str = '', default: Callable[[str | bytes], str | bytes]):
+        super().__init__(dict(), expire_seconds=0, prefix=prefix, default=default)
 
     @staticmethod
     def serialize_val(val: Any) -> bytes:
