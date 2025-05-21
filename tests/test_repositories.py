@@ -7,14 +7,11 @@ from typing import Callable
 from cryptography.fernet import InvalidToken
 
 
-DEFAULT_STANDARD_KW = {'expire_seconds': 60}
-DEFAULT_ENCRYPTED_KW = {'expire_seconds': 60, 'passphrase': 'test'}
-
-
 RepositoryFactory = Callable[[...], repositories.KeyValueRepository]
 
 
-
+DEFAULT_STANDARD_KW = {'expire_seconds': 60}
+DEFAULT_ENCRYPTED_KW = {'expire_seconds': 60, 'passphrase': 'test'}
 STANDARD_REPOS: list[RepositoryFactory] = [
     lambda **kw: repositories.DictRepository(**(DEFAULT_STANDARD_KW | kw)),
     lambda **kw: repositories.DirectoryRepository(**(DEFAULT_STANDARD_KW | kw)),
