@@ -2,6 +2,7 @@
 Storage classes that unifies interactions with key-value stored information
 """
 # Builtins
+import re
 import abc
 import json
 import pickle
@@ -58,8 +59,10 @@ class KeyValueRepository(abc.ABC, Generic[_T]):
         expire_seconds: int = 0,
         passphrase: _SeedType = '',
         *,
+        prefix: str = '',
         default: None | Callable[[str], Any] = None
     ):
+        self.prefix: str = prefix
         self.storage: _T = storage
         self.expire_seconds: int = expire_seconds
         if default is None:
@@ -89,15 +92,15 @@ class KeyValueRepository(abc.ABC, Generic[_T]):
     def __init_subclass__(cls: type[Self]) -> None:
         super().__init_subclass__()
         delitem = cls.__delitem__
-        cls.__delitem__ = lambda self, key: delitem(self, cls.customize_key(key))
+        cls.__delitem__ = lambda self, key: delitem(self, self.customize_key(key))
         getitem = cls.__getitem__
         cls.__getitem__ = lambda self, key: cls.unserialize_val(
-            getitem(self, cls.customize_key(key)) if not self.is_encrypted
-            else self.cipher.decrypt(getitem(self, cls.customize_key(key)))
+            getitem(self, self.customize_key(key)) if not self.is_encrypted
+            else self.cipher.decrypt(getitem(self, self.customize_key(key)))
         )
         setitem = cls.__setitem__
         cls.__setitem__ = lambda self, key, value: setitem(
-            self, cls.customize_key(key),
+            self, self.customize_key(key),
             cls.serialize_val(value) if not self.is_encrypted
             else self.cipher.encrypt(cls.serialize_val(value))
         )
@@ -106,11 +109,6 @@ class KeyValueRepository(abc.ABC, Generic[_T]):
     def build_cipher(passphrase: _SeedType) -> Fernet:
         random.seed(passphrase)
         return Fernet(key=b64encode(random.randbytes(32)))
-
-    @staticmethod
-    def customize_key(key: str) -> str:
-        """Converts key into a different string, like :python:`"prefix:{}".format`"""
-        return key
 
     @staticmethod
     def serialize_val(val: Any) -> bytes:
@@ -141,6 +139,10 @@ class KeyValueRepository(abc.ABC, Generic[_T]):
     def iter_matching(self, pattern: str) -> Iterator[tuple[str, Any]]:
         """Iterates over (key, value) pairs of keys that match provided pattern"""
         raise NotImplementedError(f"{type(self).__name__} does not matching iteration")
+
+    def customize_key(self, key: str) -> str:
+        """Converts key into a different string, by default :python:`"prefix:{}".format`"""
+        return f"{self.prefix}{key}"
 
     @abc.abstractmethod
     def __getitem__(self, key: str) -> Any:
@@ -196,6 +198,11 @@ class DictRepository(KeyValueRepository[dict]):
             return
         self.expire_storage[key] = _now() + timedelta(seconds=self.expire_seconds)
 
+    def iter_matching(self, pattern: str) -> Iterator[tuple[str, Any]]:
+        for key, val in self.storage.items():
+            if re.match(pattern, key):
+                yield key, val
+
     def __getitem__(self, key: str) -> Any:
         value = self.storage.get(key)
         if (value is None):
@@ -245,6 +252,9 @@ class RedisRepository(KeyValueRepository['Redis']):
         if self.expire_seconds <= 0:
             return
         self.storage.expire(key, time=self.expire_seconds)
+
+    def iter_matching(self, pattern: str) -> Iterator[tuple[str, Any]]:
+        yield from self.storage.scan_iter(pattern)
 
     def __getitem__(self, key: str) -> Any:
         val = self.storage.get(key)
