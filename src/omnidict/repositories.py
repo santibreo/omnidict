@@ -191,7 +191,7 @@ class DictRepository(KeyValueRepository[dict]):
         prefix: str = '',
         default: None | Callable[[str], Any] = None
     ):
-        super().__init__(storage or dict(), expire_seconds, passphrase, default=default)
+        super().__init__(storage or dict(), expire_seconds, passphrase, prefix=prefix, default=default)
         self.expire_storage: dict[str, datetime] = dict()
 
     def _expire(self, key: str) -> None:
@@ -298,12 +298,12 @@ class DirectoryRepository(KeyValueRepository[Path]):
         storage = Path(directory or tempfile.mkdtemp())
         if storage.is_file():
             raise TypeError(f"DirectoryRepository initialized with file path '{storage}'")
-        super().__init__(storage, expire_seconds, passphrase, default=default)
+        super().__init__(storage, expire_seconds, passphrase, prefix=prefix, default=default)
         self.storage.mkdir(exist_ok=True, parents=True)
         self.expire_storage = shelve.DbfilenameShelf(tempfile.mktemp())
 
     def customize_key(self, key: str):
-        return f"{self.prefix}{md5(key.encode()).hexdigest()}"
+        return super().customize_key(md5(key.encode()).hexdigest())
 
     @staticmethod
     def serialize_val(val: Any) -> bytes:
@@ -366,7 +366,7 @@ class DbFilenameRepository(KeyValueRepository[shelve.DbfilenameShelf]):
         if Path(filepath).is_file():
             raise TypeError(f"DbFilenameRepository initialized with file path '{filepath}'")
         storage = shelve.DbfilenameShelf(filepath or tempfile.mktemp())
-        super().__init__(storage, expire_seconds, passphrase, default=default)
+        super().__init__(storage, expire_seconds, passphrase, prefix=prefix, default=default)
         self.expire_storage = shelve.DbfilenameShelf(tempfile.mktemp())
 
     def _expire(self, key: str) -> None:

@@ -7,22 +7,44 @@ from typing import Callable
 from cryptography.fernet import InvalidToken
 
 
-STANDARD_REPOS: list[Callable[[], repositories.KeyValueRepository]] = [
-    lambda: repositories.DictRepository(expire_seconds=60),
-    lambda: repositories.DirectoryRepository(expire_seconds=60),
-    lambda: repositories.DbFilenameRepository(expire_seconds=60),
-    lambda: repositories.RedisRepository(FakeRedis(), expire_seconds=60),
+DEFAULT_STANDARD_KW = {'expire_seconds': 60}
+DEFAULT_ENCRYPTED_KW = {'expire_seconds': 60, 'passphrase': 'test'}
+
+
+RepositoryFactory = Callable[[...], repositories.KeyValueRepository]
+
+
+
+STANDARD_REPOS: list[RepositoryFactory] = [
+    lambda **kw: repositories.DictRepository(**(DEFAULT_STANDARD_KW | kw)),
+    lambda **kw: repositories.DirectoryRepository(**(DEFAULT_STANDARD_KW | kw)),
+    lambda **kw: repositories.DbFilenameRepository(**(DEFAULT_STANDARD_KW | kw)),
+    lambda **kw: repositories.RedisRepository(FakeRedis(), **(DEFAULT_STANDARD_KW | kw)),
 ]
-ENCRYPTED_REPOS: list[Callable[[], repositories.KeyValueRepository]] = [
-    lambda: repositories.DictRepository(expire_seconds=60, passphrase='test'),
-    lambda: repositories.DirectoryRepository(expire_seconds=60, passphrase='test'),
-    lambda: repositories.DbFilenameRepository(expire_seconds=60, passphrase='test'),
-    lambda: repositories.RedisRepository(FakeRedis(), expire_seconds=60, passphrase='test'),
+ENCRYPTED_REPOS: list[RepositoryFactory] = [
+    lambda **kw: repositories.DictRepository(**(DEFAULT_ENCRYPTED_KW | kw)),
+    lambda **kw: repositories.DirectoryRepository(**(DEFAULT_ENCRYPTED_KW | kw)),
+    lambda **kw: repositories.DbFilenameRepository(**(DEFAULT_ENCRYPTED_KW | kw)),
+    lambda **kw: repositories.RedisRepository(FakeRedis(), **(DEFAULT_ENCRYPTED_KW | kw)),
 ]
-DEFAULT_REPO: list[Callable[[], repositories.KeyValueRepository]] = [
-    lambda: repositories.DefaultRepository(default=lambda _: uuid4())
+DEFAULT_REPO: list[RepositoryFactory] = [
+    lambda **kw: repositories.DefaultRepository(default=lambda _: uuid4(), **kw)
 ]
 ALL_REPOS = STANDARD_REPOS + ENCRYPTED_REPOS + DEFAULT_REPO
+
+
+@pytest.mark.parametrize('repository_factory', ALL_REPOS)
+def test_customize_key(repository_factory: RepositoryFactory):
+    repository = repository_factory()
+    repository.customize_key = "aaa:{}:bbb".format
+    assert repository.customize_key('key').startswith('aaa:'), 'Key not customized'
+    assert repository.customize_key('key').endswith(':bbb'), 'Key not customized'
+
+
+@pytest.mark.parametrize('repository_factory', ALL_REPOS)
+def test_customize_key_prefix(repository_factory: RepositoryFactory):
+    repository = repository_factory(prefix='testing::')
+    assert repository.customize_key('key').startswith('testing::'), 'Key not customized'
 
 
 @pytest.mark.parametrize('repository_factory', STANDARD_REPOS + ENCRYPTED_REPOS)
